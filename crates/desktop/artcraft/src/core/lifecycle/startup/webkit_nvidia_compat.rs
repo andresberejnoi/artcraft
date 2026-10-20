@@ -18,6 +18,11 @@
 #[cfg(target_os = "linux")]
 const NVIDIA_KERNEL_MODULE_PATH: &str = "/sys/module/nvidia";
 
+/// The driver also reports its version through procfs. This is a fallback for
+/// environments that do not mount `/sys/module`.
+#[cfg(target_os = "linux")]
+const NVIDIA_PROC_VERSION_PATH: &str = "/proc/driver/nvidia/version";
+
 /// Env var understood by NVIDIA's proprietary driver to skip the strict Wayland
 /// explicit-sync handshake that WebKitGTK cannot complete.
 #[cfg(target_os = "linux")]
@@ -26,6 +31,8 @@ const NVIDIA_DISABLE_EXPLICIT_SYNC_ENV: &str = "__NV_DISABLE_EXPLICIT_SYNC";
 #[cfg(target_os = "linux")]
 use std::env;
 #[cfg(target_os = "linux")]
+use std::ffi::OsStr;
+#[cfg(target_os = "linux")]
 use std::path::Path;
 
 /// Applies the NVIDIA explicit-sync workaround when the proprietary driver is
@@ -33,12 +40,11 @@ use std::path::Path;
 /// user's or launcher's explicit choice.
 #[cfg(target_os = "linux")]
 pub fn apply_webkit_nvidia_workarounds() {
-  if !Path::new(NVIDIA_KERNEL_MODULE_PATH).exists() {
-    return;
-  }
+  let nvidia_driver_present = Path::new(NVIDIA_KERNEL_MODULE_PATH).exists()
+    || Path::new(NVIDIA_PROC_VERSION_PATH).exists();
+  let explicit_sync = env::var_os(NVIDIA_DISABLE_EXPLICIT_SYNC_ENV);
 
-  // Respect an explicit setting from the user or launcher.
-  if env::var_os(NVIDIA_DISABLE_EXPLICIT_SYNC_ENV).is_some() {
+  if !should_set_explicit_sync(nvidia_driver_present, explicit_sync.as_deref()) {
     return;
   }
 
@@ -47,6 +53,38 @@ pub fn apply_webkit_nvidia_workarounds() {
   env::set_var(NVIDIA_DISABLE_EXPLICIT_SYNC_ENV, "1");
 }
 
-/// No-op on non-Linux platforms.
+/// Returns whether the explicit-sync default should be applied. An existing
+/// value always wins, including `0` and an empty value.
+#[cfg(target_os = "linux")]
+fn should_set_explicit_sync(
+  nvidia_driver_present: bool,
+  explicit_sync: Option<&OsStr>,
+) -> bool {
+  nvidia_driver_present && explicit_sync.is_none()
+}
+
 #[cfg(not(target_os = "linux"))]
 pub fn apply_webkit_nvidia_workarounds() {}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn does_nothing_without_nvidia() {
+    assert!(!should_set_explicit_sync(false, None));
+    assert!(!should_set_explicit_sync(false, Some(OsStr::new("0"))));
+  }
+
+  #[test]
+  fn sets_explicit_sync_when_nvidia_and_unset() {
+    assert!(should_set_explicit_sync(true, None));
+  }
+
+  #[test]
+  fn respects_existing_explicit_sync_value() {
+    assert!(!should_set_explicit_sync(true, Some(OsStr::new("0"))));
+    assert!(!should_set_explicit_sync(true, Some(OsStr::new("1"))));
+    assert!(!should_set_explicit_sync(true, Some(OsStr::new(""))));
+  }
+}

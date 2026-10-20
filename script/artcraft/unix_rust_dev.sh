@@ -45,10 +45,8 @@ sqlx_offline() {
 #sqlx_migrate
 sqlx_offline
 
-# Issue with Linux performance
-# https://github.com/tauri-apps/tauri/issues/13498
-export WEBKIT_DISABLE_DMABUF_RENDERER=1
-export WEBKIT_DISABLE_COMPOSITING_MODE=1
+# WebKitGTK graphics workarounds are applied in Rust before Tauri starts;
+# see webkit_nvidia_compat.rs.
 
 echo "Build and run..."
 RUSTFLAGS="-Awarnings" cargo tauri dev \
